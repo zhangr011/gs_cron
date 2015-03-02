@@ -18,6 +18,7 @@ cron_test_() ->
              fun monthly_cron_test/1,
              fun weekly_cron_test/1,
              fun daily_cron_test/1,
+             fun hourly_cron_test/1,
              fun once_cron_test/1,
              fun validation_test/1]}}.
 
@@ -112,6 +113,31 @@ daily_cron_test(_) ->
                          2500 -> timeout
                      end).
 
+hourly_cron_test(_) ->
+    receive_clean(),
+    gs_cron:set_datetime({{2015, 3, 2}, {0, 0, 0}}),
+    Self = self(),
+    
+    gs_cron:cron({hourly_cron_test,
+                  hourly,
+                  [{{0, 0},
+                    {gs_cron_util, send, [Self, hourly_cron_test_ack1]}},
+                   {{30, 0},
+                    {gs_cron_util, send, [Self, hourly_cron_test_ack2]}}]}),
+    
+    ?assertMatch(ok, receive
+                         hourly_cron_test_ack1 -> ok
+                     after
+                         2000 -> timeout
+                     end),
+
+    
+    gs_cron:set_datetime({{2015, 3, 2}, {0, 29, 59}}),
+    ?assertMatch(ok, receive
+                         hourly_cron_test_ack2 -> ok
+                     after
+                         2000 -> timeout
+                     end).
 
 validation_test(_) ->
     ?assertMatch(valid, gs_cron:validate({test, monthly, 

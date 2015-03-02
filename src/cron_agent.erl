@@ -55,7 +55,9 @@ is_weekly_day(Day) ->
 is_time(Hour, Minute) ->
     Hour >= 0 andalso Hour < 24 andalso 
         Minute >= 0 andalso Minute < 60.
-
+is_time(hourly, Minute, Second) ->
+    Minute >= 0 andalso Minute < 60 andalso
+        Second >= 0 andalso Second < 60;
 is_time(Hour, Minute, Seconds) ->
     Hour >= 0 andalso Hour < 24 andalso 
         Minute >= 0 andalso Minute < 60 andalso
@@ -67,6 +69,10 @@ validate({_, CycleType, CycleData}) ->
 validate(once, CycleData) ->
     validate2(CycleData, fun({{Year, Month, Day, Hour, Minute, Seconds}, MFA}) ->
                                  calendar:valid_date({Year, Month, Day}) andalso is_time(Hour, Minute, Seconds) andalso is_mfa(MFA)
+                         end);
+validate(hourly, CycleData) ->
+    validate2(CycleData, fun({{Minute, Second}, MFA}) ->
+                                 is_time(hourly, Minute, Second) andalso is_mfa(MFA)
                          end);
 validate(daily, CycleData) ->
     validate2(CycleData, fun({{Hour, Minute}, MFA}) ->
@@ -198,7 +204,7 @@ cycle_data_sort(once, [{{_, _, _, _, _, _}, _}|_]=CycleData0) ->
                      GregorianSeconds = calendar:datetime_to_gregorian_seconds({{Year, Month, Day}, {Hour, Minute, Seconds}}),
                      {GregorianSeconds, MFA}
                  end || {{Year, Month, Day, Hour, Minute, Seconds}, MFA} <- CycleData0],
-    cycle_data_sort(once, CycleData);
+    cycle_data_sort(once, CycleData);    
 cycle_data_sort(daily, CycleData0) ->
     CycleData = [case Time of
                      {Hour, Minute} ->
@@ -265,6 +271,17 @@ until_next_time(#state{
             {Seconds, MFA}
     end;
 until_next_time(#state{
+                   cycle_type = hourly,
+                   cycle_data = CycleData
+                   } = State) ->
+    {CurrentDateTime, GregorianSeconds} = current(State),
+    case hourly_next(CurrentDateTime, GregorianSeconds, CycleData) of
+        {Seconds, MFA} ->
+            {Seconds, MFA};
+        not_found ->
+            hourly_next_hour(CurrentDateTime, GregorianSeconds, CycleData)
+    end;
+until_next_time(#state{
                    cycle_type = daily,
                    cycle_data = CycleData
                   } = State) ->
@@ -301,7 +318,26 @@ until_next_time(#state{
             monthly_next_month(CurrentDateTime, GregorianSeconds, CycleData)
     end.
 
+hourly_next(_, _, []) ->
+    not_found;
+hourly_next({CurrentDate, {Hour, _, _}} = CurrentDateTime, GregorianSeconds,
+           [{{Minute, Second}, MFA} | CycleData]) ->    
+    NextDateTime = {CurrentDate, {Hour, Minute, Second}},
+    if
+        NextDateTime >= CurrentDateTime ->
+            NextGregorianSeconds = calendar:datetime_to_gregorian_seconds(NextDateTime),
+            {NextGregorianSeconds - GregorianSeconds, MFA};
+        true ->
+            hourly_next(CurrentDateTime, GregorianSeconds, CycleData)
+    end.
 
+hourly_next_hour({CurrentDate, {Hour, _, _}}, GregorianSeconds,
+                 [{{Minute, Second}, MFA} | _]) ->
+    NextGregorianSeconds = calendar:datetime_to_gregorian_seconds(
+                             {CurrentDate, {0, 0, 0}}) +
+        calendar:time_to_seconds({Hour + 1, Minute, Second}),
+    {NextGregorianSeconds - GregorianSeconds, MFA}.
+    
 daily_next(_, _, []) ->
     not_found;
 daily_next({CurrentDate, _} = CurrentDateTime, GregorianSeconds,
